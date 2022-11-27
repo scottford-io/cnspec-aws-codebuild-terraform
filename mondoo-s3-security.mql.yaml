@@ -1,0 +1,498 @@
+policies:
+  - uid: mondoo-terraform-hcl-aws-s3-security
+    name: Terraform HCL Security for AWS S3 by Mondoo
+    version: 0.1.0
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    docs:
+      desc: |
+        ## Overview
+        This policy checks AWS S3 for security misconfigurations. The policy works with Terraform HCL (pre-plan), Terraform plan files (post plan), Terraform State (post apply), and directly against the AWS API in runtime. 
+
+        ## Local scan
+        Local scan refer to scans of files and operating systems where `cnspec` is installed.
+
+        ### Scan a Terraform project
+
+        Open a terminal and run the following command: 
+
+        ```bash
+        cnspec scan terraform /path/to/terraform/directory
+        ```
+
+        ## Join the community!
+
+        Our goal is to build policies that are simple to deploy, accurate, and actionable. 
+        
+        If you have any suggestions on how to improve this policy, or if you need support, [join the community](https://github.com/orgs/mondoohq/discussions) in GitHub Discussions. 
+    specs:
+      - asset_filter:
+          query: |
+            platform.name == "terraform"
+            terraform.providers.one(nameLabel == "aws")
+        scoring_queries:
+          mondoo-terraform-hcl-aws-s3-security-check-for-trusted-provider:
+          mondoo-terraform-hcl-aws-s3-security-check-provider-version:
+          mondoo-terraform-hcl-aws-s3-security-check-kms-key-deletion-window:
+          mondoo-terraform-hcl-aws-s3-security-check-trusted-modules:
+          mondoo-terraform-hcl-aws-s3-security-check-s3-module-version: 
+          mondoo-terraform-hcl-aws-s3-security-check-s3-module-versioning-enabled:
+          mondoo-terraform-hcl-aws-s3-security-check-s3-not-public:
+          mondoo-terraform-hcl-aws-s3-security-check-s3-encryption:
+  - uid: mondoo-aws-s3-security
+    name: AWS S3 Security by Mondoo
+    version: 0.1.0
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    docs:
+      desc: |
+        ## Overview
+
+        This policy checks AWS S3 buckets for security misconfigurations.
+
+        ## Remote scan
+        Remote scans use native transports in `cnspec` to provide on demand scan results without the need to install any agents, or integration. 
+        
+        For a complete list of native transports run: 
+        
+        ```bash
+        cnspec scan --help
+        ``` 
+        ### Prerequisites
+        Remote scanning of AWS accounts with `cnspec` leverages the access key ID and secret access key configured for the AWS CLI where `cnspec` is installed. 
+        
+        ### Scan an AWS account
+        The following command will perform a scan of all enabled regions in an AWS account:
+        ```bash
+        cnspec scan aws
+        ```
+        ### Scan an AWS account using a specific profile
+        If multiple AWS profiles are configured for the AWS CLI, `cnspec` can target a specific profile by setting the `AWS_PROFILE` environment variable.
+        ```bash
+        export AWS_PROFILE=my-profile
+        cnspec scan aws 
+        ```
+        ## Join the community!
+        Our goal is to build policies that are simple to deploy, accurate, and actionable. 
+        
+        If you have any suggestions on how to improve this policy, or if you need support, [join the community](https://github.com/orgs/mondoohq/discussions) in GitHub Discussions. 
+    specs:
+      - title: AWS S3 Bucket Security by Mondoo
+        asset_filter:
+          query: |
+            asset.platform == "aws"
+            asset.kind == "api"
+        scoring_queries:
+          mondoo-aws-s3-security-check-s3-module-versioning-enabled:
+          mondoo-aws-s3-security-check-s3-not-public:
+          mondoo-aws-s3-security-check-s3-encryption:
+          mondoo-aws-s3-security-check-s3-tags:
+queries: 
+  - uid: mondoo-terraform-hcl-aws-s3-security-check-for-trusted-provider
+    title: Ensure project uses the official AWS Provider from HashiCorp
+    docs:
+      desc: |
+        This control checks Terraform HCL code to ensure the project uses the "official" AWS provider maintained by HashiCorp
+      remediation: |
+        Ensure the `required_providers` block specifies the source as "hashicorp/aws"
+
+        ```hcl
+        terraform {
+          required_providers {
+            aws = {
+              source  = "hashicorp/aws"
+              version = "4.41.0"
+            }
+          }
+        }
+        ```  
+    query: terraform.blocks.where( type == "terraform" ).all( blocks { arguments['aws']['source'] == /hashicorp\/aws/} )
+  - uid: mondoo-terraform-hcl-aws-s3-security-check-provider-version
+    title: Ensure AWS provider is at least version 4
+    docs:
+      desc: |
+        This checks Terraform HCL code to ensure the version of the AWS provider is at least version `4`
+      remediation: |
+        The following example will pass because `version = "4.41.0"`
+
+        terraform {
+          required_providers {
+            aws = {
+              source  = "hashicorp/aws"
+              version = "4.41.0"
+            }
+          }
+        }
+    query: terraform.blocks.where( type == "terraform" ) { blocks { arguments['aws']['version'] == /4/ } }
+  - uid: mondoo-terraform-hcl-aws-s3-security-check-kms-key-deletion-window
+    title: Ensure any KMS keys have a deletion window of 7 days or less
+    docs:
+      desc: |
+        This checks Terraform HCL code to ensure that any usage of the resource `aws_kms_key` includes the argument `deletion_window_in_days` with a value less than or equal to `7`
+      remediation: |
+        The following example will pass be cause `deletion_window_in_days` is set to `7`
+
+        ```hcl
+        resource "aws_kms_key" "s3_bucket_key" {
+          description             = "KMS key is used to encrypt bucket objects"
+          deletion_window_in_days = 7
+        }
+        ```
+    query: terraform.resources.where( nameLabel == "aws_kms_key" ).all( arguments['deletion_window_in_days'] <= 7 )
+  - uid: mondoo-terraform-hcl-aws-s3-security-check-trusted-modules
+    title: Ensure all modules are from a trusted source
+    docs: 
+      desc: |
+        This checks Terraform HCL code to ensure that any modules come from a trusted source (i.e.registry.terraform.io/terraform-aws-modules)
+      remediation: |
+        The following example will pass because the `source` is set to `registry.terraform.io/terraform-aws-modules/s3-bucket/aws`
+
+        ```hcl
+        module "s3_bucket" {
+          source  = "terraform-aws-modules/s3-bucket/aws"
+          version = "3.6.0"
+
+          bucket_name = local.bucket_name
+        }
+        ``` 
+    query: terraform.modules.where( dir != "." ).all( source.contains("registry.terraform.io/terraform-aws-modules") )
+  - uid: mondoo-terraform-hcl-aws-s3-security-check-s3-module-version
+    title: Ensure all S3 modules use supported version
+    docs: 
+      desc: |
+        This checks Terraform HCL code to ensure that any usage of the official AWS S3 module from the Terraform registry uses a supported version ( ~= v.3.6 )
+      remediation: |
+        The following example will pass because the `version` is set to `3.6.0`
+
+        ```hcl
+        module "s3_bucket" {
+          source  = "terraform-aws-modules/s3-bucket/aws"
+          version = "3.6.0"
+
+          bucket_name = local.bucket_name
+        }
+        ``` 
+    query: terraform.modules.where( source == /registry.terraform.io\/terraform-aws-modules\/s3-bucket/ ).all( version == /3\.6/)
+  - uid: mondoo-terraform-hcl-aws-s3-security-check-s3-module-versioning-enabled
+    title: Ensure all S3 buckets are configured with versioning enabled
+    docs: 
+      desc: |
+        This checks Terraform HCL code to ensure that S3 buckets have versioning enabled
+      remediation: |
+        The following example will pass because it contains  a `versioning` block with `status = true`
+
+        ```hcl
+        module "s3_bucket" {
+          source  = "terraform-aws-modules/s3-bucket/aws"
+          version = "3.6.0"
+
+          bucket_name = local.bucket_name
+
+          versioning = {
+            status     = true
+            mfa_delete = false
+          }
+        }
+        ``` 
+    query: terraform.modules.where( source == /registry.terraform.io\/terraform-aws-modules\/s3-bucket/ ).all( block { arguments['versioning']['status'] == true })
+  - uid: mondoo-terraform-hcl-aws-s3-security-check-s3-not-public
+    title: Ensure all S3 buckets are not publicly accessible
+    docs: 
+      desc: |
+        This checks Terraform HCL code to ensure that S3 buckets are not publicly accessible
+      remediation: |
+        The following example will pass because it contains blocks to prevent the bucket from being publicly accessible
+
+        ```hcl
+        module "s3_bucket" {
+          source  = "terraform-aws-modules/s3-bucket/aws"
+          version = "3.6.0"
+
+          bucket_name = local.bucket_name
+
+          # S3 bucket-level Public Access Block configuration
+          block_public_acls       = true
+          block_public_policy     = true
+          ignore_public_acls      = true
+          restrict_public_buckets = true
+          acl = "private" 
+        }
+        ``` 
+    query: |
+      terraform.modules.where( source == /registry.terraform.io\/terraform-aws-modules\/s3-bucket/ ).all(
+        block.arguments['acl'] == "private" && 
+        block.arguments['block_public_acls'] == true && 
+        block.arguments['block_public_policy'] == true && 
+        block.arguments['ignore_public_acls'] == true && 
+        block.arguments['restrict_public_buckets'] == true 
+      ) 
+  - uid: mondoo-terraform-hcl-aws-s3-security-check-s3-encryption
+    title: Ensure all S3 buckets are encrypted with AWS KMS
+    docs: 
+      desc: |
+        This checks Terraform HCL code to ensure that S3 buckets are encrypted using AWS KMS
+      remediation: |
+        The following example will pass because it contains a `server_side_encryption_configuration` block with `sse_algorithm = "aws:kms"` 
+
+        ```hcl
+        module "s3_bucket" {
+          source  = "terraform-aws-modules/s3-bucket/aws"
+          version = "3.6.0"
+
+          bucket_name = local.bucket_name
+
+          server_side_encryption_configuration = {
+            rule = {
+              apply_server_side_encryption_by_default = {
+                kms_master_key_id = aws_kms_key.objects.arn
+                sse_algorithm     = "aws:kms"
+              }
+            }
+          }
+        ``` 
+    query: |
+      terraform.modules.where( source == /registry.terraform.io\/terraform-aws-modules\/s3-bucket/ ).all(
+        block.arguments['server_side_encryption_configuration'] != null &&
+        block.arguments['server_side_encryption_configuration']['rule']['apply_server_side_encryption_by_default']['sse_algorithm'] == "aws:kms"
+      )
+  - uid: mondoo-aws-s3-security-check-s3-module-versioning-enabled
+    title: Ensure all S3 buckets are configured with versioning enabled
+    docs: 
+      desc: |
+        This checks AWS S3 buckets to ensure that versioning is enabled
+      audit: |
+        __cnspec shell__
+
+        1. Open a Terminal.
+        2. Connect cnspec shell to your AWS environment `cnspec shell aws`
+        3. Run the following query 
+        
+          ```mql
+          aws.s3.buckets { name versioning }
+          ```
+          Example output
+          ```mql
+          aws.s3.buckets: [
+            0: {
+              versioning: {
+                MFADelete: "Disabled"
+                Status: "Enabled"
+              }
+              name: "cnspec-tested-bucket-big-pony"
+              tags: {
+                Owner: "cnspec user"
+                Terraform: "true"
+              }
+            }
+          ]
+          ```
+      remediation: |
+        __Terraform Example__
+
+        The following example uses the official AWS S3 module from HashiCorp on the Terraform Registry. The `versioning` block with `status = true` enables bucket versioning.
+
+        ```hcl
+        module "s3_bucket" {
+          source  = "terraform-aws-modules/s3-bucket/aws"
+          version = "3.6.0"
+
+          bucket_name = local.bucket_name
+
+          versioning = {
+            status     = true
+            mfa_delete = false
+          }
+        }
+        ``` 
+    query: aws.s3.buckets.all( versioning['Status'] == "Enabled" )
+  - uid: mondoo-aws-s3-security-check-s3-not-public
+    title: Ensure S3 buckets are not publicly accessible
+    docs: 
+      desc: |
+        This checks AWS S3 buckets to ensure that they are not publicly accessible
+      audit: |
+        __cnspec shell__
+
+        1. Open a Terminal.
+        2. Connect cnspec shell to your AWS environment `cnspec shell aws`
+        3. Run the following query 
+        
+          ```mql
+          aws.s3.buckets { name public publicAccessBlock }
+          ```
+          Example output
+          ```mql
+          aws.s3.buckets: [
+            0: {
+              public: false
+              name: "cnspec-tested-bucket-big-pony"
+              publicAccessBlock: {
+                BlockPublicAcls: true
+                BlockPublicPolicy: true
+                IgnorePublicAcls: true
+                RestrictPublicBuckets: true
+              }
+            }
+          ]
+          ```
+      remediation: |
+        __Terraform Example__
+
+        The following example uses the official AWS S3 module from HashiCorp on the Terraform Registry. The `versioning` block with `status = true` enables bucket versioning.
+
+        ```hcl
+        module "s3_bucket" {
+          source  = "terraform-aws-modules/s3-bucket/aws"
+          version = "3.6.0"
+
+          bucket_name = local.bucket_name
+
+          # S3 bucket-level Public Access Block configuration
+          block_public_acls       = true
+          block_public_policy     = true
+          ignore_public_acls      = true
+          restrict_public_buckets = true
+          acl = "private" 
+        }
+        ``` 
+    query: |
+      aws.s3.buckets.all( 
+        public == false && 
+        publicAccessBlock['BlockPublicAcls'] == true && 
+        publicAccessBlock['BlockPublicPolicy'] == true && 
+        publicAccessBlock['IgnorePublicAcls'] == true && 
+        publicAccessBlock['RestrictPublicBuckets'] == true 
+      )
+  - uid: mondoo-aws-s3-security-check-s3-encryption
+    title: Ensure S3 buckets are encrypted with KMS
+    docs: 
+      desc: |
+        This checks AWS S3 buckets to ensure that they are encrypted AWS KMS
+      audit: |
+        __cnspec shell__
+
+        1. Open a Terminal.
+        2. Connect cnspec shell to your AWS environment `cnspec shell aws`
+        3. Run the following query 
+        
+          ```mql
+          aws.s3.buckets { name encryption }
+          ```
+
+          Example output
+
+          ```mql
+          aws.s3.buckets: [
+            0: {
+              encryption: {
+                Rules: [
+                  0: {
+                    ApplyServerSideEncryptionByDefault: {
+                      KMSMasterKeyID: "arn:aws:kms:us-east-1:691070941234:key/11ea88fb-e9a0-4c00-9d0e-4f408940b689"
+                      SSEAlgorithm: "aws:kms"
+                    }
+                    BucketKeyEnabled: false
+                  }
+                ]
+              }
+            }
+          ]
+          ```
+      remediation: |
+        __Terraform Example__
+
+        The following example uses the official AWS S3 module from HashiCorp on the Terraform Registry. The `versioning` block with `status = true` enables bucket versioning.
+
+        ```hcl
+        resource "aws_kms_key" "objects" {
+          description             = "KMS key is used to encrypt S3 bucket objects"
+          deletion_window_in_days = 7
+        }
+        
+        module "s3_bucket" {
+          source  = "terraform-aws-modules/s3-bucket/aws"
+          version = "3.6.0"
+
+          bucket_name = local.bucket_name
+
+          server_side_encryption_configuration = {
+            rule = {
+              apply_server_side_encryption_by_default = {
+                kms_master_key_id = aws_kms_key.objects.arn
+                sse_algorithm     = "aws:kms"
+              }
+            }
+          }
+        }
+        ``` 
+    query: |
+      aws.s3.buckets.all( 
+        encryption != null &&
+        encryption['Rules'][0]['ApplyServerSideEncryptionByDefault']['SSEAlgorithm'] == "aws:kms" 
+      )
+  - uid: mondoo-aws-s3-security-check-s3-tags
+    title: Ensure S3 buckets are configured with company tagging standard
+    docs: 
+      desc: |
+        This checks AWS S3 buckets to ensure that they configured using company default tags
+
+        ```
+        Owner: "<Bucket owner>"
+        Contact: "<Bucket owner email address>"
+        Department: "<Bucket ownder department>"
+        Terraform: "<bool>"
+        ```
+      audit: |
+        __cnspec shell__
+
+        1. Open a Terminal.
+        2. Connect cnspec shell to your AWS environment `cnspec shell aws`
+        3. Run the following query 
+        
+          ```mql
+          aws.s3.buckets { name tags }
+          ```
+
+          Example output
+
+          ```mql
+          aws.s3.buckets: [
+            0: {
+              tags: {
+                Contact: "user@example.com"
+                Department: "Platform Engineering"
+                Owner: "cnspec user"
+                Terraform: "true"
+              }
+            }
+          ]
+          ```
+      remediation: |
+        __Terraform Example__
+
+        The following example uses the official AWS S3 module from HashiCorp on the Terraform Registry. The `versioning` block with `status = true` enables bucket versioning.
+
+        ```hcl
+        module "s3_bucket" {
+          source  = "terraform-aws-modules/s3-bucket/aws"
+          version = "3.6.0"
+
+          bucket_name = local.bucket_name
+
+          tags = {
+            Terraform = "true"
+            Owner = "cnspec user"
+            Contact = "user@example.com"
+            Department = "Platform Engineering"
+          }
+        }
+        ``` 
+    query: |
+      aws.s3.buckets.all( 
+        tags['Owner'] && 
+        tags['Contact'] && 
+        tags['Department'] 
+      )
+         
